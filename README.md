@@ -68,6 +68,15 @@ tenure rewrite draft.md
 bun run src/index.ts rewrite draft.md
 ```
 
+Pipe rewritten output into a new file:
+
+```bash
+tenure rewrite draft.md > rewritten.md
+
+# bun run equivalent:
+bun run src/index.ts rewrite draft.md > rewritten.md
+```
+
 Rewrite piped stdin:
 
 ```bash
@@ -95,6 +104,15 @@ tenure rewrite --model claude-sonnet-4-20250514 draft.md
 bun run src/index.ts rewrite --model claude-sonnet-4-20250514 draft.md
 ```
 
+Write directly to a file (without shell redirection):
+
+```bash
+tenure rewrite -o rewritten.md draft.md
+
+# bun run equivalent:
+bun run src/index.ts rewrite -o rewritten.md draft.md
+```
+
 ## CLI Reference
 
 Main commands:
@@ -105,6 +123,8 @@ Main commands:
   - `bun run src/index.ts rewrite [file]`
 - `tenure rewrite --diff [file]`: print a line diff of original vs rewritten
   - `bun run src/index.ts rewrite --diff [file]`
+- `tenure rewrite -o <output-file> [file]`: write rewritten text to file
+  - `bun run src/index.ts rewrite -o <output-file> [file]`
 - `tenure --help`: show command help
   - `bun run src/index.ts --help`
 

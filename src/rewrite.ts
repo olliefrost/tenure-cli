@@ -35,13 +35,20 @@ export async function rewriteWithProfile(params: {
   profile: StyleProfile;
   model?: string;
   verbose?: boolean;
+  onDelta?: (chunk: string) => void;
 }): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("Missing ANTHROPIC_API_KEY.");
   }
 
-  const { text, profile, model = DEFAULT_MODEL, verbose = false } = params;
+  const {
+    text,
+    profile,
+    model = DEFAULT_MODEL,
+    verbose = false,
+    onDelta
+  } = params;
   const client = new Anthropic({ apiKey });
 
   // Use the SDK streaming API so users see incremental output.
@@ -71,12 +78,11 @@ export async function rewriteWithProfile(params: {
     ) {
       const delta = event.delta.text;
       rewritten += delta;
-      // Stream directly to stdout for responsive terminal UX.
-      process.stdout.write(delta);
+      // Delegate each streamed chunk to caller so CLI can choose destination
+      // (stdout for piping or file mode for direct write).
+      onDelta?.(delta);
     }
   }
-
-  process.stdout.write("\n");
   return rewritten.trim();
 }
 

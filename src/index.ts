@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Main CLI entry point.
 // This file wires command-line flags/arguments to the concrete pipeline modules.
+import { writeFile } from "node:fs/promises";
 import process from "node:process";
 import { Command, CommanderError } from "commander";
 import { ingestSamples } from "./ingest.ts";
@@ -54,12 +55,13 @@ program
   // Optional file; when omitted we read from stdin.
   .argument("[file]", "file to rewrite, otherwise reads stdin")
   .option("--diff", "show diff instead of rewritten text", false)
+  .option("-o, --out <file>", "write rewritten output to a file")
   .option("--model <model>", "Anthropic model", "claude-sonnet-4-20250514")
   .option("-v, --verbose", "show progress logs", false)
   .action(
     async (
       file: string | undefined,
-      options: { diff: boolean; model: string; verbose: boolean }
+      options: { diff: boolean; out?: string; model: string; verbose: boolean }
     ) => {
       // Accept either `tenure rewrite file.md` or `cat file.md | tenure rewrite`.
       const input = await readRewriteInput(file);
@@ -69,16 +71,29 @@ program
 
       // Rewrite requires an existing profile from `tenure init`.
       const stored = loadProfile();
+      // Stream to stdout unless we're in diff mode or file-output mode.
+      const shouldStreamToStdout = !options.diff && !options.out;
       const rewritten = await rewriteWithProfile({
         text: input,
         profile: stored.profile,
         model: options.model,
-        verbose: options.verbose
+        verbose: options.verbose,
+        onDelta: shouldStreamToStdout
+          ? (chunk) => {
+              process.stdout.write(chunk);
+            }
+          : undefined
       });
+
+      if (options.out) {
+        await writeFile(options.out, `${rewritten}\n`, "utf8");
+      }
 
       // In diff mode we render a text diff after streaming completes.
       if (options.diff) {
         process.stdout.write(`${renderDiff(input, rewritten)}\n`);
+      } else if (shouldStreamToStdout) {
+        process.stdout.write("\n");
       }
     }
   );
