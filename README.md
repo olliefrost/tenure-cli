@@ -4,6 +4,10 @@ Tenure is a Bun + TypeScript CLI that learns your writing style from a corpus an
 
 Command examples below use `tenure ...`, with `bun run` equivalents shown for local development before linking the binary globally.
 
+Defaults:
+- `tenure init` uses `./samples` when no sample path is supplied.
+- `tenure rewrite` writes to `./outputs` by default when no output location is supplied.
+
 ## Quick Start
 
 ### 1) Install dependencies
@@ -39,6 +43,13 @@ You can also point `tenure init` directly at existing folders; you do not need t
 Initialise from one or more folders/files:
 
 ```bash
+tenure init
+# defaults to ./samples
+
+# bun run equivalent:
+bun run src/index.ts init
+
+# explicit paths:
 tenure init samples
 # or:
 tenure init ~/notes ~/essays ./old-drafts
@@ -63,6 +74,7 @@ Rewrite from a file:
 
 ```bash
 tenure rewrite draft.md
+# writes to ./outputs/draft.rewritten.md by default
 
 # bun run equivalent:
 bun run src/index.ts rewrite draft.md
@@ -71,19 +83,29 @@ bun run src/index.ts rewrite draft.md
 Pipe rewritten output into a new file:
 
 ```bash
-tenure rewrite draft.md > rewritten.md
+tenure rewrite --stdout draft.md > rewritten.md
 
 # bun run equivalent:
-bun run src/index.ts rewrite draft.md > rewritten.md
+bun run src/index.ts rewrite --stdout draft.md > rewritten.md
 ```
 
 Rewrite piped stdin:
 
 ```bash
 cat draft.md | tenure rewrite
+# writes to ./outputs/rewritten-<timestamp>.txt by default
 
 # bun run equivalent:
 cat draft.md | bun run src/index.ts rewrite
+```
+
+Rewrite piped stdin to stdout (for shell piping):
+
+```bash
+cat draft.md | tenure rewrite --stdout > rewritten.md
+
+# bun run equivalent:
+cat draft.md | bun run src/index.ts rewrite --stdout > rewritten.md
 ```
 
 Show a diff of original vs rewritten:
@@ -121,6 +143,8 @@ Main commands:
   - `bun run src/index.ts init <paths...>`
 - `tenure rewrite [file]`: rewrite a file or stdin using the saved profile
   - `bun run src/index.ts rewrite [file]`
+- `tenure rewrite --stdout [file]`: stream rewritten text to stdout (useful for shell pipes)
+  - `bun run src/index.ts rewrite --stdout [file]`
 - `tenure rewrite --diff [file]`: print a line diff of original vs rewritten
   - `bun run src/index.ts rewrite --diff [file]`
 - `tenure rewrite -o <output-file> [file]`: write rewritten text to file

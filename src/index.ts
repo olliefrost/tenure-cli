@@ -1,13 +1,17 @@
 #!/usr/bin/env bun
 // Main CLI entry point.
 // This file wires command-line flags/arguments to the concrete pipeline modules.
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { Command, CommanderError } from "commander";
 import { ingestSamples } from "./ingest.ts";
 import { buildStyleProfile } from "./profile.ts";
 import { rewriteWithProfile, readRewriteInput, renderDiff } from "./rewrite.ts";
 import { loadProfile, saveProfile } from "./store.ts";
+
+const DEFAULT_SAMPLES_PATH = "samples";
+const DEFAULT_OUTPUTS_DIR = "outputs";
 
 // Commander holds the root command plus all subcommands.
 const program = new Command();
@@ -22,14 +26,22 @@ program
 program
   .command("init")
   .description("Ingest writing samples and generate a style profile")
-  .argument("<paths...>", "directories or files to ingest")
+  .argument("[paths...]", "directories or files to ingest")
   // Model can be overridden per run so users can experiment.
   .option("--model <model>", "Anthropic model", "claude-sonnet-4-20250514")
   // Verbose emits progress to stderr so stdout stays parse-friendly.
   .option("-v, --verbose", "show progress logs", false)
   .action(async (paths: string[], options: { model: string; verbose: boolean }) => {
+    // Default to ./samples when no explicit path is supplied.
+    const selectedPaths = paths.length > 0 ? paths : [DEFAULT_SAMPLES_PATH];
+    if (options.verbose && paths.length === 0) {
+      process.stderr.write(
+        `No sample paths provided, defaulting to ./${DEFAULT_SAMPLES_PATH}.\n`
+      );
+    }
+
     // 1) Read files + chunk into context-safe segments.
-    const ingest = await ingestSamples(paths);
+    const ingest = await ingestSamples(selectedPaths);
     if (options.verbose) {
       process.stderr.write(
         `Loaded ${ingest.files.length} files, ${ingest.wordCount} words, ${ingest.chunks.length} chunks.\n`
@@ -56,13 +68,24 @@ program
   .argument("[file]", "file to rewrite, otherwise reads stdin")
   .option("--diff", "show diff instead of rewritten text", false)
   .option("-o, --out <file>", "write rewritten output to a file")
+  .option("--stdout", "stream rewritten output to stdout", false)
   .option("--model <model>", "Anthropic model", "claude-sonnet-4-20250514")
   .option("-v, --verbose", "show progress logs", false)
   .action(
     async (
       file: string | undefined,
-      options: { diff: boolean; out?: string; model: string; verbose: boolean }
+      options: {
+        diff: boolean;
+        out?: string;
+        stdout: boolean;
+        model: string;
+        verbose: boolean;
+      }
     ) => {
+      if (options.stdout && options.out) {
+        throw new Error("Use either --stdout or --out, not both.");
+      }
+
       // Accept either `tenure rewrite file.md` or `cat file.md | tenure rewrite`.
       const input = await readRewriteInput(file);
       if (!input) {
@@ -71,8 +94,9 @@ program
 
       // Rewrite requires an existing profile from `tenure init`.
       const stored = loadProfile();
-      // Stream to stdout unless we're in diff mode or file-output mode.
-      const shouldStreamToStdout = !options.diff && !options.out;
+      // In normal mode we now default to writing output under ./outputs.
+      // `--stdout` keeps pipe-friendly behaviour when explicitly requested.
+      const shouldStreamToStdout = !options.diff && options.stdout;
       const rewritten = await rewriteWithProfile({
         text: input,
         profile: stored.profile,
@@ -85,8 +109,14 @@ program
           : undefined
       });
 
-      if (options.out) {
-        await writeFile(options.out, `${rewritten}\n`, "utf8");
+      if (!options.diff && !shouldStreamToStdout) {
+        const outputPath = resolveOutputPath({
+          explicitOutPath: options.out,
+          sourceFilePath: file
+        });
+        await mkdir(path.dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, `${rewritten}\n`, "utf8");
+        process.stderr.write(`Saved rewritten output to ${outputPath}\n`);
       }
 
       // In diff mode we render a text diff after streaming completes.
@@ -117,4 +147,23 @@ try {
   const message = error instanceof Error ? error.message : "Unknown error.";
   process.stderr.write(`tenure: ${message}\n`);
   process.exit(1);
+}
+
+function resolveOutputPath(params: {
+  explicitOutPath?: string;
+  sourceFilePath?: string;
+}): string {
+  const { explicitOutPath, sourceFilePath } = params;
+  if (explicitOutPath) {
+    return path.resolve(explicitOutPath);
+  }
+
+  if (sourceFilePath) {
+    const ext = path.extname(sourceFilePath);
+    const base = path.basename(sourceFilePath, ext);
+    return path.resolve(DEFAULT_OUTPUTS_DIR, `${base}.rewritten${ext || ".txt"}`);
+  }
+
+  const timestamp = new Date().toISOString().replaceAll(":", "-");
+  return path.resolve(DEFAULT_OUTPUTS_DIR, `rewritten-${timestamp}.txt`);
 }
