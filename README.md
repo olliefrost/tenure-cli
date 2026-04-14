@@ -16,6 +16,16 @@ Defaults:
 bun install
 ```
 
+### 1.5) (Optional) Link the CLI command globally
+
+If you want to run `tenure ...` directly (instead of `bun run src/index.ts ...`), link the package once from the project root:
+
+```bash
+bun link
+```
+
+After this, `tenure --help` should work in your shell.
+
 ### 2) Add your Anthropic API key
 
 Set it for your current shell session:
