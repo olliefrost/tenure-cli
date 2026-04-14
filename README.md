@@ -26,15 +26,21 @@ bun link
 
 After this, `tenure --help` should work in your shell.
 
-### 2) Add your Anthropic API key
+### 2) Add an API key (Anthropic or OpenAI)
 
-Set it for your current shell session:
+Set one (or both) for your current shell session:
 
 ```bash
 export ANTHROPIC_API_KEY="your_key_here"
+export OPENAI_API_KEY="your_key_here"
 ```
 
-If you want it to persist, add the same line to your shell config (`~/.bashrc`, `~/.zshrc`, etc.), then restart your shell.
+If you want it to persist, add the same line(s) to your shell config (`~/.bashrc`, `~/.zshrc`, etc.), then restart your shell.
+
+Provider/model selection:
+- If only one key is set, Tenure uses that provider by default.
+- If both keys are set and no model is specified, Tenure defaults to Anthropic.
+- You can force provider choice with `--model` (for example `claude-sonnet-4-20250514` or `gpt-4.1`).
 
 ### 3) Prepare writing samples
 
@@ -131,9 +137,11 @@ Use a specific model if needed:
 
 ```bash
 tenure rewrite --model claude-sonnet-4-20250514 draft.md
+tenure rewrite --model gpt-4.1 draft.md
 
 # bun run equivalent:
 bun run src/index.ts rewrite --model claude-sonnet-4-20250514 draft.md
+bun run src/index.ts rewrite --model gpt-4.1 draft.md
 ```
 
 Write directly to a file (without shell redirection):
@@ -172,5 +180,5 @@ bun run typecheck
 ## Notes
 
 - Profiles are persisted locally via `conf` under your user config directory (for example `~/.config` on Linux).
-- v1 uses Anthropic for style extraction and rewriting.
+- Tenure supports both Anthropic and OpenAI APIs for style extraction and rewriting.
 - Offline embeddings are intentionally deferred; the codebase is structured so local clustering can be added later.

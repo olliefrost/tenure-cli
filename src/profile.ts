@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+import { resolveProvider } from "./provider.ts";
 import { isStyleProfile, type StyleProfile } from "./types.ts";
 
-// Default model for both style extraction and rewrite in v1.
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 // Batch size threshold used to keep each extraction request bounded.
 const MAX_CHARS_PER_BATCH = 14_000;
 // Lightweight retry count for transient API failures.
@@ -20,15 +20,16 @@ export interface BuildProfileOptions {
 // Runs style extraction over chunk batches and returns one merged profile.
 export async function buildStyleProfile({
   chunks,
-  model = DEFAULT_MODEL,
+  model,
   verbose = false
 }: BuildProfileOptions): Promise<{ profile: StyleProfile; model: string }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing ANTHROPIC_API_KEY.");
-  }
-
-  const client = new Anthropic({ apiKey });
+  const selected = resolveProvider(model);
+  const anthropicClient = process.env.ANTHROPIC_API_KEY
+    ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+    : undefined;
+  const openaiClient = process.env.OPENAI_API_KEY
+    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    : undefined;
   // Split chunks into prompt-sized batches.
   const batches = createBatches(chunks, MAX_CHARS_PER_BATCH);
 
@@ -42,24 +43,19 @@ export async function buildStyleProfile({
 
     // Retry each batch extraction independently.
     const profile = await withRetries(async () => {
-      const response = await client.messages.create({
-        model,
-        max_tokens: 1200,
-        // Lower temperature to encourage consistent structured outputs.
-        temperature: 0.2,
-        messages: [
-          {
-            role: "user",
-            content: buildExtractionPrompt(batches[index] ?? [])
-          }
-        ]
-      });
-
-      const text = response.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
+      const prompt = buildExtractionPrompt(batches[index] ?? []);
+      const text =
+        selected.provider === "anthropic"
+          ? await extractWithAnthropic({
+              client: anthropicClient,
+              model: selected.model,
+              prompt
+            })
+          : await extractWithOpenAI({
+              client: openaiClient,
+              model: selected.model,
+              prompt
+            });
 
       // Parse and shape-check model output before accepting it.
       return parseProfileJson(text);
@@ -69,7 +65,7 @@ export async function buildStyleProfile({
   }
 
   // If multiple batches were used, merge into one aggregate profile.
-  return { profile: mergeProfiles(partialProfiles), model };
+  return { profile: mergeProfiles(partialProfiles), model: selected.model };
 }
 
 function buildExtractionPrompt(chunks: string[]): string {
@@ -103,11 +99,11 @@ function parseProfileJson(raw: string): StyleProfile {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new Error("Anthropic returned invalid JSON while extracting profile.");
+    throw new Error("Model returned invalid JSON while extracting profile.");
   }
 
   if (!isStyleProfile(parsed)) {
-    throw new Error("Anthropic JSON did not match expected style profile shape.");
+    throw new Error("Model JSON did not match expected style profile shape.");
   }
 
   return parsed;
@@ -187,4 +183,57 @@ async function withRetries<T>(fn: () => Promise<T>): Promise<T> {
   }
 
   throw lastError instanceof Error ? lastError : new Error("Unknown API failure.");
+}
+
+async function extractWithAnthropic(params: {
+  client: Anthropic | undefined;
+  model: string;
+  prompt: string;
+}): Promise<string> {
+  const { client, model, prompt } = params;
+  if (!client) {
+    throw new Error("Missing ANTHROPIC_API_KEY.");
+  }
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: 1200,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  });
+
+  return response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+}
+
+async function extractWithOpenAI(params: {
+  client: OpenAI | undefined;
+  model: string;
+  prompt: string;
+}): Promise<string> {
+  const { client, model, prompt } = params;
+  if (!client) {
+    throw new Error("Missing OPENAI_API_KEY.");
+  }
+
+  const response = await client.chat.completions.create({
+    model,
+    temperature: 0.2,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  });
+
+  return response.choices[0]?.message.content?.trim() ?? "";
 }

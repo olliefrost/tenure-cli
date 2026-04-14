@@ -2,10 +2,9 @@ import { readFile } from "node:fs/promises";
 import process from "node:process";
 import Anthropic from "@anthropic-ai/sdk";
 import { diffLines } from "diff";
+import OpenAI from "openai";
+import { resolveProvider } from "./provider.ts";
 import type { StyleProfile } from "./types.ts";
-
-// Default rewrite model; can be overridden by CLI flag.
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 // Reads rewrite input from either a provided file or piped stdin.
 // This keeps CLI UX flexible:
@@ -37,53 +36,40 @@ export async function rewriteWithProfile(params: {
   verbose?: boolean;
   onDelta?: (chunk: string) => void;
 }): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing ANTHROPIC_API_KEY.");
-  }
-
   const {
     text,
     profile,
-    model = DEFAULT_MODEL,
+    model,
     verbose = false,
     onDelta
   } = params;
-  const client = new Anthropic({ apiKey });
-
-  // Use the SDK streaming API so users see incremental output.
-  const stream = client.messages.stream({
-    model,
-    // A rough heuristic for max output budget.
-    max_tokens: Math.max(1400, Math.ceil(text.length * 0.8)),
-    temperature: 0.3,
-    messages: [
-      {
-        role: "user",
-        content: buildRewritePrompt(text, profile)
-      }
-    ]
-  });
+  const selected = resolveProvider(model);
+  const prompt = buildRewritePrompt(text, profile);
 
   if (verbose) {
-    process.stderr.write(`Rewriting with model ${model}...\n`);
+    process.stderr.write(
+      `Rewriting with ${selected.provider} model ${selected.model}...\n`
+    );
   }
 
-  let rewritten = "";
-  // The stream emits many event types; we only consume text deltas.
-  for await (const event of stream) {
-    if (
-      event.type === "content_block_delta" &&
-      event.delta.type === "text_delta"
-    ) {
-      const delta = event.delta.text;
-      rewritten += delta;
-      // Delegate each streamed chunk to caller so CLI can choose destination
-      // (stdout for piping or file mode for direct write).
-      onDelta?.(delta);
-    }
+  if (selected.provider === "anthropic") {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    return rewriteWithAnthropic({
+      client,
+      model: selected.model,
+      prompt,
+      text,
+      onDelta
+    });
   }
-  return rewritten.trim();
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return rewriteWithOpenAI({
+    client,
+    model: selected.model,
+    prompt,
+    onDelta
+  });
 }
 
 export function renderDiff(original: string, rewritten: string): string {
@@ -120,4 +106,70 @@ ${JSON.stringify(profile, null, 2)}
 
 Text to rewrite:
 ${text}`;
+}
+
+async function rewriteWithAnthropic(params: {
+  client: Anthropic;
+  model: string;
+  prompt: string;
+  text: string;
+  onDelta?: (chunk: string) => void;
+}): Promise<string> {
+  const { client, model, prompt, text, onDelta } = params;
+  const stream = client.messages.stream({
+    model,
+    max_tokens: Math.max(1400, Math.ceil(text.length * 0.8)),
+    temperature: 0.3,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  });
+
+  let rewritten = "";
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      const delta = event.delta.text;
+      rewritten += delta;
+      onDelta?.(delta);
+    }
+  }
+
+  return rewritten.trim();
+}
+
+async function rewriteWithOpenAI(params: {
+  client: OpenAI;
+  model: string;
+  prompt: string;
+  onDelta?: (chunk: string) => void;
+}): Promise<string> {
+  const { client, model, prompt, onDelta } = params;
+  const stream = await client.chat.completions.create({
+    model,
+    temperature: 0.3,
+    stream: true,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  });
+
+  let rewritten = "";
+  for await (const event of stream) {
+    const delta = event.choices[0]?.delta?.content ?? "";
+    if (delta.length > 0) {
+      rewritten += delta;
+      onDelta?.(delta);
+    }
+  }
+
+  return rewritten.trim();
 }

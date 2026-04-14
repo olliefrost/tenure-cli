@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name("tenure")
   .description("Extract and apply your writing style profile")
-  .version("0.1.0");
+  .version("1.0.0");
 
 // `init` builds and persists a style profile from writing samples.
 program
@@ -28,10 +28,10 @@ program
   .description("Ingest writing samples and generate a style profile")
   .argument("[paths...]", "directories or files to ingest")
   // Model can be overridden per run so users can experiment.
-  .option("--model <model>", "Anthropic model", "claude-sonnet-4-20250514")
+  .option("--model <model>", "model override (Anthropic or OpenAI)")
   // Verbose emits progress to stderr so stdout stays parse-friendly.
   .option("-v, --verbose", "show progress logs", false)
-  .action(async (paths: string[], options: { model: string; verbose: boolean }) => {
+  .action(async (paths: string[], options: { model?: string; verbose: boolean }) => {
     // Default to ./samples when no explicit path is supplied.
     const selectedPaths = paths.length > 0 ? paths : [DEFAULT_SAMPLES_PATH];
     if (options.verbose && paths.length === 0) {
@@ -69,7 +69,7 @@ program
   .option("--diff", "show diff instead of rewritten text", false)
   .option("-o, --out <file>", "write rewritten output to a file")
   .option("--stdout", "stream rewritten output to stdout", false)
-  .option("--model <model>", "Anthropic model", "claude-sonnet-4-20250514")
+  .option("--model <model>", "model override (Anthropic or OpenAI)")
   .option("-v, --verbose", "show progress logs", false)
   .action(
     async (
@@ -78,7 +78,7 @@ program
         diff: boolean;
         out?: string;
         stdout: boolean;
-        model: string;
+        model?: string;
         verbose: boolean;
       }
     ) => {
